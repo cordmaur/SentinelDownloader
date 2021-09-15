@@ -101,6 +101,8 @@ class SSatDatabase:
         if self.download_db_path.exists() and images_folder.exists() and qlooks_folder.exists():
             self.df = pd.read_csv(self.download_db_path, index_col='Unnamed: 0')
             self.df = self.df.astype(SSatDatabase.columns_dtypes, errors='ignore')
+            
+            self.update()
             return True
         else:
             self.logger.error(f'Folder {base_dir} if not a valid database.')

@@ -99,7 +99,7 @@ class SSatDownloader:
             print(f'Retrieving product online status. This may take a while...')
             self._search_df['online'] = self._search_df.index.map(self.api.is_online)
         else:
-            self._search_df['online'] = True
+            self._search_df['online'] = False
 
         # update local information
         self.update_local_info()
@@ -180,14 +180,23 @@ class SSatDownloader:
         self.api.show_progressbars = True
 
     def download_all(self, max_attempts=10, background=False):
-        if not self.check_search_df(display_msg=True) or not self.database.initialized(display_message=True):
+    
+        # First we check if the database is ready to start downloading
+        if not self.database.initialized(display_message=True):
             return
 
+        # Then, even if the to_download list is empty, we will add the search_df to the database. That's usefull to start a database with images
+        # already downloaded. There is a notebook to explain this workflow. No duplicates will be allowed. 
+        if self._search_df is not None:
+            self.database.add_data(self._search_df)
+
+        # Then, we check if there is something that is not downloaded yet
         if self.to_download is None or len(self.to_download) == 0:
             self.logger.info('No images to download.')
             return
 
-        self.database.add_data(self.to_download)
+        # Regardless the download type, we will disable the messages from sentinelsat
+        self.api.logger.disabled = True
 
         # if it is a background download, launches 2 threads, one for the download and the other to
         # check for its conclusion
@@ -197,7 +206,6 @@ class SSatDownloader:
             print(f'To check the download status, use the .download_status() method.')
 
             # Turn off the sentinelsat messages and progress bars
-            self.api.logger.disabled = True
             self.api.show_progressbars = False
 
             # Shutdown any existing executor
@@ -220,6 +228,7 @@ class SSatDownloader:
                                                 max_attempts=max_attempts)
 
             self.update_local_info()
+            self.api.logger.disabled = False
 
     def check_search_df(self, display_msg=False):
         if self._search_df is None or len(self._search_df) == 0:
@@ -375,16 +384,21 @@ class SSatDownloader:
         1- images in the query and not downloaded
         2- images in the database not downloaded (due to an error, for example)
         """
-        if not self.check_search_df(display_msg=True) or not self.database.initialized():
+        
+        # Don't show images to download if the database is not initialized
+        if not self.database.initialized(display_message=True):
             return
 
-        to_download_search = self._search_df[~self._search_df['downloaded']]
+        # If there is a database, use the combined_df (search + database) to check for possible downloads
+        return self.combined_df[~self.combined_df['downloaded']]
+        
+        # to_download_search = self._search_df[~self._search_df['downloaded']]
 
         # concatenate the items from the search and the database
-        to_download = pd.concat([to_download_search, self.database.to_download])
+        # to_download = pd.concat([to_download_search, self.database.to_download])
 
         # Returns the list of images to be downloaded, removing any duplicates
-        return to_download[~to_download.index.duplicated()]
+        # return to_download[~to_download.index.duplicated()]
 
     @property
     def download_status(self):
@@ -410,10 +424,10 @@ class SSatDownloader:
     @property
     def combined_df(self):
         result = None
-        if self.check_search_df(display_msg=True):
+        if self.check_search_df(display_msg=False):
             result = self._search_df
 
-        if self.database.initialized():
+        if self.database.initialized(display_message=False):
             if result is None:
                 result = self.database.df
             else:
