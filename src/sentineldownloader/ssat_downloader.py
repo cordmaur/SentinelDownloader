@@ -2,11 +2,12 @@ from pathlib import Path
 import math
 import matplotlib.pyplot as plt
 import pandas as pd
-from sentinelsat import SentinelAPI
+from sentinelsat import SentinelAPI, geojson_to_wkt
 from datetime import date
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import time
+from geojson import Point, Polygon
 from .ssat_database import SSatDatabase
 
 
@@ -15,7 +16,7 @@ class ApiUrl:
 
 
 class SSatDownloader:
-    base_columns = ['tile', 'date', 'platformserialidentifier', 'processinglevel', 'producttype', 'online',
+    base_columns = ['tile', 'date', 'platformserialidentifier', 'processinglevel', 'producttype', 'size', 'online',
                     'downloaded', 'qlook']
 
     def __init__(self, user, password, api=ApiUrl.copernicus_hub, logger_level=logging.INFO):
@@ -67,6 +68,48 @@ class SSatDownloader:
         """Makes a new connection and tests it"""
         self.api = SSatDownloader.create_connection(user, password, api)
 
+    def search(self, tile_id=None, polygon=None, start=None, end=None, level=None, post_filter=None, **kwargs):
+        """
+        A simplified search method for Sentinel2 imagery. It searches by tile_id or bbox (not both).
+        More parameters can be passed to the query by the key-word arguments (**kwkargs).
+        :param tile_id: identification of the tile (ex. '23KKQ')
+        :param polygon: Polygon in the format [(long1, lat1), (long2, lat2), ...]
+        If just one tuple (long, lat) is passed, it will be assumed a Point geometry.
+        :param start: start date 'YYYYMMDD' or 'YYYY-MM-DDThh:mm:ss'. If None is passed, Today-1 is considered
+        :param end: start date 'YYYYMMDD' or 'YYYY-MM-DDThh:mm:ss'. If None, Today is considered.
+        :param level: 'Level-2A' or 'Level-1C' or None for both
+        :return: None. Attribute .search_df will be filled.
+        """
+
+        # Check if tile_id or bbox have been informed correctly
+        if tile_id is None and polygon is None:
+            print('tile_id or bbox should be informed.')
+            return
+        elif tile_id is not None and polygon is not None:
+            print('tile_id and bbox cannot be used at the same time.')
+            return
+
+        # check if there is a valid connection
+        if not self._check_api or self._is_downloading:
+            return
+
+        # create the date info
+        start = 'NOW-1DAY' if start is None else start
+        end = 'NOW' if end is None else end
+        date_info = (start, end)
+
+        # if tile_id is informed write the filename corresponding to the tile_id
+        if tile_id is not None:
+            filename = f'*{tile_id}*'
+            self.query(filename=filename, processinglevel=level, date=date_info, post_filter=post_filter, **kwargs)
+
+        # otherwise, create a geometry
+        else:
+            geom = SSatDownloader.create_geometry(polygon)
+
+            if geom is not None:
+                self.query(area=geom, processinglevel=level, date=date_info, post_filter=post_filter, **kwargs)
+
     def query(self, post_filter=None, search_online=False, **kwargs):
         """
         Performs a fundamental query to the API.
@@ -76,7 +119,7 @@ class SSatDownloader:
         Ex. (filename='*23KKQ*', date=('20190101', '20200101'), producttyp='S2MSI2A', ...)
         For all the options, check our Copernicus Open Access Hub documentation.
         https://sentinelsat.readthedocs.io/en/stable/api_overview.html#:~:text=Copernicus%20Open%20Access%20Hub%20documentation.
-        :return:None
+        :return:None. Attribute .search_df will be filled.
         """
         # check if there is a valid connection
         if not self._check_api or self._is_downloading:
@@ -85,7 +128,16 @@ class SSatDownloader:
         self.query_args = kwargs
 
         products = self.api.query(**kwargs)
-        self._search_df = self.api.to_dataframe(products).sort_values(by='beginposition')
+
+        # check if the query returned anything
+        if len(products) == 0:
+            self._search_df = None
+            return
+
+        self._search_df = self.api.to_dataframe(products)
+
+        # order results by datetime
+        self._search_df.sort_values(by='beginposition')
 
         # apply post filter before proceeding
         self.filter_results(query=post_filter)
@@ -110,10 +162,6 @@ class SSatDownloader:
         """
         Update the products dataframe. If local is True, update only local info and don't make a new query to the api.
         """
-        # check the dataset
-        if not self.check_search_df(display_msg=True):
-            return
-
         if local:
             self.update_local_info()
         else:
@@ -182,10 +230,11 @@ class SSatDownloader:
     def download_all(self, max_attempts=10, background=False):
     
         # First we check if the database is ready to start downloading
-        if not self.database.initialized(display_message=True):
+        if not self.database.initialized(display_message=True) or self._is_downloading:
             return
 
-        # Then, even if the to_download list is empty, we will add the search_df to the database. That's usefull to start a database with images
+        # Then, even if the to_download list is empty, we will add the search_df to the database.
+        # That's useful to start a database with images
         # already downloaded. There is a notebook to explain this workflow. No duplicates will be allowed. 
         if self._search_df is not None:
             self.database.add_data(self._search_df)
@@ -359,6 +408,27 @@ class SSatDownloader:
             ax.spines[axis].set_linewidth(width)
             ax.spines[axis].set_color(color)
 
+    @staticmethod
+    def create_geometry(pts, logger=None):
+        # otherwise, create a geometry
+        if isinstance(pts, tuple):
+            geometry = Point(coordinates=pts)
+
+        else:
+            # check if the polygon is correctly closed. If it is not, close it.
+            if pts[0] != pts[-1]:
+                pts.append(pts[0])
+
+            geometry = Polygon(coordinates=[pts])
+
+        # if the geometry is not valid, return None
+        if geometry.is_valid:
+            return geojson_to_wkt(geometry)
+        else:
+            # get the context logger
+            logger = logging.getLogger('sentineldownloader') if logger is None else logger
+            logger.error('Informed points do not correspond to a valid polygon.')
+
     # ------- PROPERTIES -------- #
     @property
     def _check_api(self):
@@ -450,7 +520,7 @@ class SSatDownloader:
     @property
     def database_df(self):
         if self.database.initialized(display_message=True):
-            return self.database.df
+            return self.database.df[SSatDownloader.base_columns]
 
     @property
     def summary(self):

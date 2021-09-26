@@ -141,7 +141,7 @@ class SSatDatabase:
     def update(self):
         if self.initialized() and len(self) > 0:
             # Check if products are already downloaded in the output directory
-            self.df['downloaded'] = self.images_targets.map(Path.exists)
+            self.df['downloaded'] = self.images_targets.map(SSatDatabase.check_image)
 
             # Check if products are already in the output directory
             self.df['qlook'] = self.quick_looks_targets.map(Path.exists)
@@ -170,7 +170,7 @@ class SSatDatabase:
         if not self.initialized():
             return
 
-        return self.df['identifier'].map(lambda x: self.images_folder / (x + '.zip'))
+        return self.df['identifier'].map(lambda x: self.images_folder / x)
 
     @property
     def to_download(self):
@@ -201,3 +201,10 @@ class SSatDatabase:
         s = 'SSatDatabase class\n'
         s += self.summary()
         return s
+
+    @staticmethod
+    def check_image(path):
+        path = Path(path)
+        zip_file = path.with_suffix('.zip').exists()
+        safe = path.with_suffix('.SAFE').exists()
+        return zip_file or safe
