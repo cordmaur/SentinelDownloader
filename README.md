@@ -13,3 +13,19 @@ The <b>SentinelDownloader</b> provides:
 ![image](https://user-images.githubusercontent.com/19617404/132750257-6c5e906f-80b2-492e-b6c6-d2be6d48d5df.png)
 
 
+## Instalation
+To install sentineldownloader it is necessary to clone the repository and install it from the root trough the following commands:
+```
+git clone https://github.com/cordmaur/SentinelDownloader.git
+cd SentinelDownloader
+
+pip install -r requirements.txt
+
+pip install -e .
+```
+
+# Manual
+The manual is located in the `/nbs` folder.
+https://github.com/cordmaur/SentinelDownloader/blob/main/nbs/01_Manual.ipynb
+
+
