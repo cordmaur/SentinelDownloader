@@ -49,14 +49,16 @@ class SSatDownloader:
         Open the database on the specified folder
         :return: None
         """
-        self.database.open(folder)
+        if self.database.open(folder):
+            self.clear()
 
     def create_database(self, folder):
         """
         Open the database on the specified folder
         :return: None
         """
-        self.database.create(folder)
+        if  self.database.create(folder):
+            self.clear()
 
     def clear(self):
         """Clear the instance variables"""
@@ -263,7 +265,7 @@ class SSatDownloader:
 
             self.executor = ThreadPoolExecutor(max_workers=2)
             self.result = self.executor.submit(self.api.download_all,
-                                               self.to_download .index,
+                                               self.to_download.index,
                                                directory_path=str(self.database.images_folder),
                                                max_attempts=max_attempts)
 

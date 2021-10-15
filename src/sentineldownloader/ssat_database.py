@@ -92,6 +92,7 @@ class SSatDatabase:
             self.df = self.df.astype(SSatDatabase.columns_dtypes)
 
             self.save_db()
+            return True
 
     def open(self, base_dir):
         self.folder = Path(base_dir)
